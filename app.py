@@ -12,6 +12,7 @@ from rgbxy import Converter
 from dotenv import load_dotenv
 from util.LightController import LightController
 from util.ImageProcessor import ImageProcessor
+import time
 
 load_dotenv()
 
@@ -61,43 +62,56 @@ def callback():
     # expires_in = tokenResponse["expires_in"]
 
     session['token'] = access_token
+    session['album'] = None
+    return redirect('http://127.0.0.1:5000/poll')
+
+@app.route('/poll')
+def poll():
+    access_token = session['token']
+    currentAlbum = session['album']
+    authorizaton_header = {"Authorization": "Bearer {}".format(access_token)}
+
+    #handle 204 if nothing is playing
+    currentlyPlayingResponse = requests.get(SPOTIFY_CURRENTLY_PLAYING_ENDPOINT, headers = authorizaton_header)
+    currentlyPlaying = json.loads(currentlyPlayingResponse.text)
+
+    responseAlbumId = currentlyPlaying['item']['album']['id']
+
+    print(f"comparing {responseAlbumId} and {currentAlbum}")
+    while (responseAlbumId == currentAlbum):
+        time.sleep(5)
+        currentlyPlayingResponse = requests.get(SPOTIFY_CURRENTLY_PLAYING_ENDPOINT, headers = authorizaton_header)
+        currentlyPlaying = json.loads(currentlyPlayingResponse.text)
+        responseAlbumId = currentlyPlaying['item']['album']['id']
+
+    session['currentlyPlaying'] = currentlyPlaying
     return redirect('http://127.0.0.1:5000/home')
 
     
 @app.route('/home')    
 def displayColors():
-    access_token = session['token']
-    authorizaton_header = {"Authorization": "Bearer {}".format(access_token)}
-
-    currentlyPlayingResponse = requests.get(SPOTIFY_CURRENTLY_PLAYING_ENDPOINT, headers = authorizaton_header)
-    currentlyPlaying = json.loads(currentlyPlayingResponse.text)
-
+   
+    currentlyPlaying = session['currentlyPlaying']
     imageProcessor = ImageProcessor()
 
-    if currentlyPlaying is not None:
-        trackName = currentlyPlaying['item']['name']
-        artist = currentlyPlaying['item']['artists'][0]['name']
-        image = currentlyPlaying['item']['album']['images'][0]['url']
-        colors = imageProcessor.getTopThreeColors(image)
-    else:
-        trackName = 'nothing'
-        artist = 'nobody'
-        image = 'no pics'
-        colors = 'no colors'
-
+    trackName = currentlyPlaying['item']['name']
+    artist = currentlyPlaying['item']['artists'][0]['name']
+    image = currentlyPlaying['item']['album']['images'][0]['url']
+    colors = imageProcessor.getTopThreeColors(image)
+ 
     colorBands = ''
     i = 0
     for color in colors:
         colorBands = colorBands + \
-            f"<div><div>{i}: This color is {color[1]}</div><div style='background-color: rgb{color[1]};'><br><br></div></div>"
+            f"<div>{currentlyPlaying}<div>{i}: This color is {color[1]}</div><div style='background-color: rgb{color[1]};'><br><br></div></div>"
         i = i + 1
 
     color1 = colors[0][1]
     color2 = colors[1][1]
     color3 = colors[2][1]
 
-#good examples
-#hypa hypa, mothership, psycho, the stomach for it
+    #good examples
+    #hypa hypa, mothership, psycho, the stomach for it
 
     lightController = LightController(os.getenv('BRIDGE_IP_ADDRESS'))
 
@@ -105,7 +119,10 @@ def displayColors():
     lightController.setLight('Kitchen2', color2[0], color2[1], color2[2])
     lightController.setLight('Kitchen3', color3[0], color3[1], color3[2])
 
-    return (f"<h1>Currently Playing {trackName} by {artist}</h1>" + colorBands)
+    session['album'] = currentlyPlaying['item']['album']['id']
+
+    return redirect('http://127.0.0.1:5000/poll')
+    #return (f"<h1>Currently Playing {trackName} by {artist}</h1>" + colorBands)
 
 if __name__ == "__main__":                                                      
     app.secret_key = os.urandom(24)                                             
